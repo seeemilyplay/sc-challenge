@@ -1,19 +1,21 @@
--- Helper functions for doing map reduce.
+-- | Helper functions for doing map reduce.
 module MapReduce ( mapper
                  , reducer ) where
 
+import Control.Arrow
 import Data.Function
-import Data.Functor
 import Data.List
-import Control.Monad
 
-mapper :: ([String] -> [[String]]) -> IO ()
-mapper f = streaming $ concatMap f
+{- | Turns a function into a mapper function by doing grunt work
+     for it, such as dealing with the fact the first item in a row
+     is a primary key.
+-}
+mapper :: ((a, [a]) -> [(b, [b])]) -> [[a]] -> [[b]]
+mapper f = map (uncurry (:)) . concatMap f . map (head &&& tail)
 
-reducer :: ([[String]] -> [[String]]) -> IO ()
-reducer f = streaming $ concatMap f . groupBy ((==) `on` head)
-
-streaming :: ([[String]] -> [[String]]) -> IO ()
-streaming f = do
-  input <- map words . lines <$> getContents
-  void . mapM (putStrLn . intercalate "\t") $ f input
+{- | Turns a function into a reducer function by doing grunt work
+     for it, such as grouping rows together by primary key.
+-}
+reducer :: Eq a => ((a, [[a]]) -> (b, [[b]])) -> [[a]] -> [[b]]
+reducer f =
+  concatMap (\(x,xs) -> map ((:) x) xs) . map (f . ((head . head) &&& (map tail))) . groupBy ((==) `on` head)

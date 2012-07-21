@@ -7,6 +7,7 @@ import Test.Framework (defaultMain)
 import Test.Framework.Providers.HUnit (testCase)
 import Test.HUnit (assertEqual, Assertion)
 
+import MapReduce
 import Graph
 
 runTests = defaultMain tests
@@ -27,10 +28,10 @@ testExampleWithN3 =
   assertEqual "Bad output for example with N=3" (exampleOutput 3) output
 
 mapReduce :: Bool -> [[String]] -> [[String]]
-mapReduce outputdistances input =
-  let mapperout = concatMap explodeNode input
-      reducerin = sortBy (comparing head) mapperout in
-  concatMap (gatherEdges outputdistances) $ groupBy ((==) `on` head) reducerin
+mapReduce outputdepth input =
+  let mapperout = mapper (explodeNode Nothing) input
+      reducerin = sortBy (comparing head) mapperout
+  in reducer (gatherEdges outputdepth) reducerin
 
 exampleInput :: [[String]]
 exampleInput =

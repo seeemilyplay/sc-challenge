@@ -1,5 +1,8 @@
-module Main where
+module Main (main) where
 
+import Control.Monad
+import Data.Functor
+import Data.List
 import System.Environment
 import System.Exit
 
@@ -8,12 +11,17 @@ import MapReduce
 
 main :: IO ()
 main = do
-  -- this is kind of ugly, could look for a command line parsing package to do a better job
   args <- getArgs
   case args of
-   ("explodeNode":[]) -> mapper explodeNode
-   ("gatherEdges":[]) -> reducer $ gatherEdges True
-   ("finalize":[]) -> reducer $ gatherEdges False
+   ("explodeNode":[]) -> stream $ mapper $ explodeNode Nothing
+   ("explodeNode":depth:[]) -> stream $ mapper $ explodeNode (Just $ read depth)
+   ("gatherEdges":[]) -> stream $ reducer $ gatherEdges True
+   ("gatherEdges":"False":[]) -> stream $ reducer $ gatherEdges False
    _ -> do
-     putStrLn "Usage: sc-challenge [explodeNode|gatherEdges|finalize]"
+     putStrLn "Usage: sc-challenge [explodeNode (<depth>)?|gatherEdges (False)?]"
      exitFailure
+
+stream :: ([[String]] -> [[String]]) -> IO ()
+stream f = do
+  input <- map words . lines <$> getContents
+  void . mapM (putStrLn . intercalate "\t") $ f input

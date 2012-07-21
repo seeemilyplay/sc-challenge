@@ -1,78 +1,141 @@
 SC Data Challenge
-=========================
+=================
 
 Challenge is described here: https://gist.github.com/688e80bb173ee6fb077b
 
-I decided to go with MapReduce using Hadoop's Streaming API, and coded up the mapper and reducer executables in Haskell.
+I decided to go with MapReduce using Hadoop's Streaming API, and coded the mapper and reducer executables in Haskell.
 
-Using:
-------
+How to Use:
+-----------
 
 There's a single executable which can be built and installed with cabal.
 
-`sc-challenge explodeNode` runs the mapper
+###Mapper###
 
-`sc-challenge gatherEdges` runs the reducer
+Run the mapper by calling
 
-and
+`sc-challenge explodeNode`
 
-`sc-challenge finalize` runs the reducer, but for the last time
+You can optionally pass a depth to the mapper
 
-A MapReduce is needed for each i-th degree, so you may need to do lots of piping! Here's some examples:
+`sc-challenge explodeNode 3`
 
-N = 1
-`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge finalize`
+###Reducer###
 
-N = 2
-`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge finalize`
+Run the reducer by calling
 
-N = 3
-`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge finalize`
+`sc-challenge gatherEdges`
 
-Under the covers explodeNode and finalize are almost the same, they just format their output differently.
+By default this will include depth numbers in the output, if you don't want this call
 
-There are some tests, but there isn't an automated way of running them. Here's how you run in ghci:
+`sc-challenge gatherEdges False`
 
-```
-Prelude> :load src/Test.hs src/Graph.hs
-*Test> runTests
-```
+###Putting Together###
+
+A MapReduce is needed to calculate each level of depth. Here's how you can try it out with lots of piping:
+
+####N = 1####
+`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges False`
+
+####N = 2####
+`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges False`
+
+####N = 3####
+`cat input_file | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges | sc-challenge explodeNode | sort -k1,1 | sc-challenge gatherEdges False`
+
+The mapper has some special handling built in for simple pair inputs, but apart from this it will expect the input to have depth numbers, so it's only possible to use `gatherEdges False` in the ultimate iteration.
+
+###Tests###
+
+There are some tests. They aren't hooked up to cabal, but you can run in ghci like this:
+
+    Prelude> :cd src
+    Prelude> :load Test
+    *Test> runTests
 
 What it does:
-------
+-------------
 
-The data that comes out of explodeNode and gatherEdges is formatted like this:
+For each input row the mapper will determine people who are linked by the next depth of relationships, and mark these inferred relationships by representing them with new rows.
 
-```
+The reducer then gathers all this information that the mapper produced into a single merged row per person.
 
-brendan  kim  2  omid  2  torsten  1
-davidbowie  kim  1  omid  1  ziggy  1  mick  2  torsten  2
-```
+###N=1###
 
-For each row first item is the person name, and the next items are pairs each describing one of the person's relationships.
-The first item in the pair is the related name, and the second item is the degrees between them.
-In the example above `brendan` and `torsten` are directly linked, and `brendan` and `kim` are linked through another person.
+For the input row:
 
-Mapping:
+    davidbowie omid
 
-The mapper function `explodeNode` takes a single row and generates new rows based on it, by infering other relationships.
+The mapper will output the 2 rows:
 
-For example if the distance between `brendan` and `torsten` is 1, and the distance between `brendan` and `kim` is 2, then
-we can infer that the shortest distance between `torsten` and `kim` is at most 3, (it could be less).
+    davidbowie omid 1
+    omid davidbowie 1
 
-More generally if the distance between friends A and B is x and the distance between friends A and C is y, then we know that
-the shortest distance between B and C is at most (x + y), because to get from B to C you can always go through A.
+This means that `davidbowie` is linked to `omid` by 1 degree, and that `omid` is linked to `davidbowie` by 1 degree.
 
-At each iteration we the mapper only generates new relationships for the next relevant level, so on the 3rd run it's looking
-for friends that are a distance of 3 away from each other. This is so that it doesn't cover old ground, and so that it
-doesn't create data that is unecessary yet.
+So say we have the input:
 
-Reducing:
+    davidbowie omid
+    davidbowie kim
 
-The reducing function `gatherEdges` combines all the rows for a single person into one. It does this by combining the other rows.
-It also sorts the items while it's at it. When the same relationship occurs more than once, but with different distances, the
-shortest distance is used.
+Then then the mapper output will be:
 
-The reducing function `finalize` does exactly what `gatherEdges` does, except it doesn't output any distance data.
+    davidbowie omid 1
+    omid davidbowie 1
+    davidbowie kim 1
+    kim davidbowie 1
 
+The reducer then merges the rows together to get all the relationships within 1 degree per person:
 
+    davidbowie kim 1 omid 1
+    kim davidbowie 1
+    omid davidbowie 1
+
+The reducer sorts the merged items alphabetically, and it also ensures they are unique.
+
+It's quite easy to see that the method works for `N=1`, as all the relationships are given, it's just a matter of generating the reverse relationship.
+
+###N>1###
+
+Suppose for a particular `N`, we have the correct solution for `N-1`, then the chains of links that join people through `N` degrees will be made up of links that we have already discovered in on `N-1` solution.
+
+This is because, for any people `a` and `b`, such that the degrees between them is `N`, so `d(a,b)=N`, there must exist a `c`, such that `d(c,a)=1` and `d(c,b)=N-1`. It then follows that both `d(c,a)` and `d(c,b)` are < `N`, and so will be included in the solution to `N-1`.
+
+Now suppose that we find all `a`, `b` and `c` in our solution to `N-1` such that `d(c,a)=1` and `d(c,b)=N-1`, then we will know that for all of these `d(a,b)=N`, and since all solutions for `N` can be generated from the solution for `N-1`, we know that this is a complete solution for `N`.
+
+Taking the example input from above:
+
+    davidbowie kim 1 omid 1
+    kim davidbowie 1
+    omid davidbowie 1
+
+For N=2 the mapper will consider each row key to be `c`, and generate new rows for all items such that `d(c,a)=1` and `d(c,b)=N-1`:
+
+    davidbowie kim 1 omid 1
+    kim omid 2
+    omid kim 2
+    kim davidbowie 1
+    omid davidbowie 1
+
+The reducer will then combine rows to give the solution:
+
+    davidbowie kim 1 omid 1
+    kim davidbowie 1 omid 2
+    omid davidbowie 1 kim 2
+
+As the method works for `N=1`, and it will work for any `N`, where `N-1` is solved, we can see that it will work for all `N>0`.
+
+Performance:
+------------
+
+As a new MapReduce cycle is needed for each degree from 1 to N the time complexity is linear with respect to N.
+
+The mapper function itself has O(N^2) complexity with respect to the number of existing links in a row, because it searches through different combinations of pairs. As new links get added, we should see the mapper slow slightly.
+
+The number of rows fed into the mapper function is constant, as there will always be one row per name.
+
+The reducer function has O(N) complexity with respect to both the number of rows it needs to process, and the number of links it needs to combine.
+
+Using sparse matrices is quite an efficient way of storing the data, but the storage needed for this will increase linearly with the number of links discovered.
+
+The amount of data outputted by the mapper will depend on the number of links found. At least, once a row has been generated for a link, it will not be generated again in the future.
